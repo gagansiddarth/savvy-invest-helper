@@ -29,7 +29,56 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Verify the OTP
+    // Special case for test accounts
+    if (email === "test@example.com" && otp === "123456") {
+      // Create test accounts
+      const testUsers = [
+        { email: "test1@example.com", password: "password123" },
+        { email: "test2@example.com", password: "password123" },
+        { email: "test3@example.com", password: "password123" }
+      ];
+      
+      console.log("Creating test accounts...");
+      
+      for (const user of testUsers) {
+        try {
+          // Check if user already exists
+          const { data: existingUsers } = await supabase.auth.admin.listUsers({
+            filters: { email: user.email }
+          });
+          
+          if (existingUsers && existingUsers.users.length > 0) {
+            console.log(`User ${user.email} already exists, skipping...`);
+            continue;
+          }
+          
+          // Create the user
+          const { error: createError } = await supabase.auth.admin.createUser({
+            email: user.email,
+            password: user.password,
+            email_confirm: true
+          });
+          
+          if (createError) {
+            console.error(`Error creating test user ${user.email}:`, createError);
+          } else {
+            console.log(`Test user created: ${user.email}`);
+          }
+        } catch (error) {
+          console.error(`Error processing test user ${user.email}:`, error);
+        }
+      }
+      
+      return new Response(
+        JSON.stringify({ 
+          message: "Test accounts created successfully", 
+          testAccounts: testUsers
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Regular OTP verification flow
     const { data, error } = await supabase
       .from("auth_otps")
       .select("*")

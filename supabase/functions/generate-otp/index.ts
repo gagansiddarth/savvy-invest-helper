@@ -23,6 +23,18 @@ serve(async (req) => {
       );
     }
 
+    // Special case for test accounts
+    if (email === "test@example.com") {
+      return new Response(
+        JSON.stringify({ 
+          message: "OTP generated successfully", 
+          otp: "123456", // Fixed OTP for test account
+          note: "Use this special test email/OTP to create 3 test accounts"
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Create a Supabase client with the service role key
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
