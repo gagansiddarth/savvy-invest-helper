@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +6,7 @@ import { Avatar } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { Send, Bot, User, ArrowDown, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 type Message = {
   id: string;
@@ -15,6 +15,7 @@ type Message = {
   timestamp: Date;
 };
 
+// Keep a small set of predefined responses for fallback
 const predefinedResponses: Record<string, string> = {
   'hello': "Hello! I'm your AI financial assistant. How can I help with your investment questions today?",
   'hi': "Hi there! I'm here to help with your financial questions. What would you like to know about investing?",
@@ -47,7 +48,7 @@ const ChatAssistant: React.FC = () => {
           {
             id: '1',
             role: 'assistant',
-            content: "Hello! I'm your AI financial assistant. How can I help with your investment questions today?",
+            content: "Hello! I'm your AI financial assistant powered by OpenAI. How can I help with your personal finance questions today?",
             timestamp: new Date()
           }
         ]);
@@ -55,7 +56,60 @@ const ChatAssistant: React.FC = () => {
     }
   }, [messages.length]);
 
-  const handleSend = () => {
+  const callOpenAI = async (userMessage: string) => {
+    try {
+      // Format chat history for the API (last 5 messages maximum to keep context manageable)
+      const chatHistory = messages
+        .slice(-5)
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+
+      // Call the Supabase Edge Function
+      const { data, error } = await supabase.functions.invoke('chat-finance', {
+        body: { 
+          message: userMessage, 
+          chatHistory 
+        }
+      });
+
+      if (error) {
+        console.error('Error calling OpenAI:', error);
+        throw new Error(error.message);
+      }
+
+      return data.response;
+    } catch (error) {
+      console.error('Failed to get AI response:', error);
+      return useFallbackResponse(userMessage);
+    }
+  };
+
+  const useFallbackResponse = (userInput: string) => {
+    // Simple fallback mechanism when API call fails
+    const lowercaseInput = userInput.toLowerCase();
+    
+    for (const [key, value] of Object.entries(predefinedResponses)) {
+      if (lowercaseInput.includes(key)) {
+        return value;
+      }
+    }
+    
+    // Special case for "thank you"
+    if (lowercaseInput.includes('thank') || lowercaseInput.includes('thanks')) {
+      return "You're welcome! If you have any more questions about your investments or financial planning, feel free to ask.";
+    }
+    
+    // Special case for questions about specific investments
+    if (lowercaseInput.includes('etf') || lowercaseInput.includes('mutual fund')) {
+      return "ETFs (Exchange Traded Funds) and mutual funds are both investment vehicles that pool money from multiple investors to buy a diversified portfolio of assets. ETFs trade like stocks throughout the day, while mutual funds trade once at the end of the trading day. Both can be excellent options for diversification, but they differ in terms of cost, tax efficiency, and trading flexibility.";
+    }
+    
+    return "I'm having trouble connecting to my knowledge base right now. Could you please try again in a moment?";
+  };
+
+  const handleSend = async () => {
     if (!input.trim()) return;
     
     // Add user message
@@ -70,30 +124,9 @@ const ChatAssistant: React.FC = () => {
     setInput('');
     setIsTyping(true);
     
-    // Simulate AI response delay
-    setTimeout(() => {
-      // Generate AI response
-      let responseContent = "I'm sorry, I don't have enough information to answer that question accurately. Could you provide more details?";
-      
-      // Check for predefined responses or patterns
-      const lowercaseInput = input.toLowerCase();
-      
-      for (const [key, value] of Object.entries(predefinedResponses)) {
-        if (lowercaseInput.includes(key)) {
-          responseContent = value;
-          break;
-        }
-      }
-      
-      // Special case for "thank you"
-      if (lowercaseInput.includes('thank') || lowercaseInput.includes('thanks')) {
-        responseContent = "You're welcome! If you have any more questions about your investments or financial planning, feel free to ask.";
-      }
-      
-      // Special case for questions about specific investments
-      if (lowercaseInput.includes('etf') || lowercaseInput.includes('mutual fund')) {
-        responseContent = "ETFs (Exchange Traded Funds) and mutual funds are both investment vehicles that pool money from multiple investors to buy a diversified portfolio of assets. ETFs trade like stocks throughout the day, while mutual funds trade once at the end of the trading day. Both can be excellent options for diversification, but they differ in terms of cost, tax efficiency, and trading flexibility.";
-      }
+    try {
+      // Get response from OpenAI
+      const responseContent = await callOpenAI(input);
       
       // Add AI response
       const aiMessage: Message = {
@@ -104,8 +137,16 @@ const ChatAssistant: React.FC = () => {
       };
       
       setMessages(prev => [...prev, aiMessage]);
+    } catch (error) {
+      console.error('Error processing message:', error);
+      toast({
+        title: "Error",
+        description: "Failed to get a response. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -209,7 +250,7 @@ const ChatAssistant: React.FC = () => {
         <div className="flex w-full items-center space-x-2">
           <Input
             type="text"
-            placeholder="Ask a question about investing..."
+            placeholder="Ask a question about personal finance..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
