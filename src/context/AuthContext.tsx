@@ -1,5 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { Session } from '@supabase/supabase-js';
 
 type User = {
   id: string;
@@ -13,7 +15,7 @@ type AuthContextType = {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateUserRiskProfile: (profile: 'no' | 'low' | 'medium' | 'high' | 'very-high') => void;
 };
 
@@ -22,73 +24,157 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    // Check for user in localStorage
-    const storedUser = localStorage.getItem('savvy_user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
-    setIsLoading(false);
+    // Initialize: check for existing session
+    const fetchSession = async () => {
+      setIsLoading(true);
+      
+      try {
+        // Get current session
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        setSession(currentSession);
+        
+        // Set user from session if it exists
+        if (currentSession?.user) {
+          const userData: User = {
+            id: currentSession.user.id,
+            email: currentSession.user.email || '',
+          };
+          
+          // Check for stored risk profile in localStorage
+          const storedUser = localStorage.getItem('savvy_user');
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser);
+            if (parsedUser.riskProfile) {
+              userData.riskProfile = parsedUser.riskProfile;
+            }
+          }
+          
+          setUser(userData);
+          localStorage.setItem('savvy_user', JSON.stringify(userData));
+        }
+      } catch (error) {
+        console.error("Error fetching session:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchSession();
+
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, newSession) => {
+        setSession(newSession);
+        
+        if (event === 'SIGNED_IN' && newSession?.user) {
+          const userData: User = {
+            id: newSession.user.id,
+            email: newSession.user.email || '',
+          };
+          
+          // Check for stored risk profile in localStorage
+          const storedUser = localStorage.getItem('savvy_user');
+          if (storedUser) {
+            const parsedUser = JSON.parse(storedUser);
+            if (parsedUser.riskProfile) {
+              userData.riskProfile = parsedUser.riskProfile;
+            }
+          }
+          
+          setUser(userData);
+          localStorage.setItem('savvy_user', JSON.stringify(userData));
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          localStorage.removeItem('savvy_user');
+        }
+      }
+    );
+
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
-    // In a real app, this would be an API call to authenticate
-    // For demo purposes, we'll just simulate a login
     setIsLoading(true);
     
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock successful login - in a real app, this would be validated by a server
-      const newUser: User = {
-        id: `user_${Math.random().toString(36).substring(2, 9)}`,
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        // We'll set riskProfile later after assessment
-      };
+        password,
+      });
       
-      setUser(newUser);
-      localStorage.setItem('savvy_user', JSON.stringify(newUser));
+      if (error) throw error;
       
+      if (data.user) {
+        const userData: User = {
+          id: data.user.id,
+          email: data.user.email || '',
+        };
+        
+        // Check for stored risk profile in localStorage
+        const storedUser = localStorage.getItem('savvy_user');
+        if (storedUser) {
+          const parsedUser = JSON.parse(storedUser);
+          if (parsedUser.riskProfile) {
+            userData.riskProfile = parsedUser.riskProfile;
+          }
+        }
+        
+        setUser(userData);
+        localStorage.setItem('savvy_user', JSON.stringify(userData));
+      }
     } catch (error) {
       console.error("Login failed:", error);
-      throw new Error("Invalid email or password");
+      throw error;
     } finally {
       setIsLoading(false);
     }
   };
 
   const signup = async (email: string, password: string) => {
-    // In a real app, this would create a new user account
-    // For demo purposes, we'll just simulate account creation
     setIsLoading(true);
     
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock successful signup
-      const newUser: User = {
-        id: `user_${Math.random().toString(36).substring(2, 9)}`,
+      const { data, error } = await supabase.auth.signUp({
         email,
-        // We'll set riskProfile later after assessment
-      };
+        password,
+      });
       
-      setUser(newUser);
-      localStorage.setItem('savvy_user', JSON.stringify(newUser));
+      if (error) throw error;
       
+      if (data.user) {
+        const userData: User = {
+          id: data.user.id,
+          email: data.user.email || '',
+        };
+        
+        setUser(userData);
+        localStorage.setItem('savvy_user', JSON.stringify(userData));
+      }
     } catch (error) {
       console.error("Signup failed:", error);
-      throw new Error("Could not create account");
+      throw error;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('savvy_user');
+  const logout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      
+      setUser(null);
+      localStorage.removeItem('savvy_user');
+    } catch (error) {
+      console.error("Logout failed:", error);
+      throw error;
+    }
   };
 
   const updateUserRiskProfile = (profile: 'no' | 'low' | 'medium' | 'high' | 'very-high') => {
