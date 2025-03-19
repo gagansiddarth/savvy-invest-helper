@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
@@ -13,6 +12,8 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import OTPVerification from '@/components/OTPVerification';
 
+const SUPABASE_URL = "https://cfnzzbimqbmqhzorazmd.supabase.co";
+
 const Auth = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,7 +27,6 @@ const Auth = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check URL query parameter for mode
     const params = new URLSearchParams(location.search);
     const modeParam = params.get('mode');
     
@@ -36,7 +36,6 @@ const Auth = () => {
   }, [location.search]);
 
   useEffect(() => {
-    // If already authenticated, redirect to dashboard
     if (isAuthenticated) {
       navigate('/dashboard');
     }
@@ -99,12 +98,11 @@ const Auth = () => {
     setIsSubmitting(true);
     
     try {
-      // Generate OTP for verification
-      const response = await fetch(`${supabase.supabaseUrl}/functions/v1/generate-otp`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-otp`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabase.supabaseKey}`
+          'Authorization': `Bearer ${supabase.auth.getSession().then(res => res.data.session?.access_token)}`
         },
         body: JSON.stringify({ email })
       });
@@ -115,7 +113,6 @@ const Auth = () => {
         throw new Error(data.error || "Failed to generate OTP");
       }
 
-      // Show OTP verification component
       setShowOTPVerification(true);
       
       toast({
@@ -134,18 +131,34 @@ const Auth = () => {
   };
 
   const handleResendOTP = async () => {
-    const response = await fetch(`${supabase.supabaseUrl}/functions/v1/generate-otp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${supabase.supabaseKey}`
-      },
-      body: JSON.stringify({ email })
-    });
+    try {
+      const session = await supabase.auth.getSession();
+      const accessToken = session.data.session?.access_token;
+      
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-otp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ email })
+      });
 
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || "Failed to resend OTP");
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to resend OTP");
+      }
+      
+      toast({
+        title: "Verification code resent",
+        description: "Please check your email for the new verification code.",
+      });
+    } catch (error) {
+      toast({
+        title: "Failed to resend code",
+        description: error instanceof Error ? error.message : "An unknown error occurred",
+        variant: "destructive",
+      });
     }
   };
 
@@ -153,11 +166,14 @@ const Auth = () => {
     setIsSubmitting(true);
     
     try {
-      const response = await fetch(`${supabase.supabaseUrl}/functions/v1/verify-otp`, {
+      const session = await supabase.auth.getSession();
+      const accessToken = session.data.session?.access_token;
+      
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/verify-otp`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabase.supabaseKey}`
+          'Authorization': `Bearer ${accessToken}`
         },
         body: JSON.stringify({ email, otp, password })
       });
@@ -173,10 +189,8 @@ const Auth = () => {
         description: "Your account has been created successfully.",
       });
 
-      // Log the user in
       await login(email, password);
       
-      // Redirect to risk assessment
       navigate('/risk-assessment');
       
     } catch (error) {
